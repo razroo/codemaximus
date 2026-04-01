@@ -2,7 +2,7 @@ import random
 
 from codemaximus.generators.base import SlopGenerator, GeneratedFile
 from codemaximus import naming, comments
-from codemaximus.native import line_count
+from codemaximus.native import line_count, native_generate_java
 
 
 class EnterpriseJavaGenerator(SlopGenerator):
@@ -11,6 +11,11 @@ class EnterpriseJavaGenerator(SlopGenerator):
     extension = ".java"
 
     def generate(self, sanity: float, file_index: int) -> GeneratedFile:
+        if native_generate_java is not None:
+            content, lc, cname = native_generate_java(sanity, file_index)
+            filename = f"java/{cname}_{file_index}{self.extension}"
+            return GeneratedFile(filename=filename, content=content, line_count=lc)
+
         parts: list[str] = []
         cname = naming.class_name(sanity)
         pkg = naming.java_package(sanity)

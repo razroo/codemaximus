@@ -2,7 +2,7 @@ import random
 
 from codemaximus.generators.base import SlopGenerator, GeneratedFile
 from codemaximus import naming, comments
-from codemaximus.native import line_count
+from codemaximus.native import line_count, native_generate_javascript
 
 _TS_PRIMITIVES = (
     "string",
@@ -22,6 +22,11 @@ class JavaScriptGenerator(SlopGenerator):
     extension = ".js"
 
     def generate(self, sanity: float, file_index: int) -> GeneratedFile:
+        if native_generate_javascript is not None:
+            content, lc, module_name, ext = native_generate_javascript(sanity, file_index)
+            filename = f"js/{module_name}_{file_index}{ext}"
+            return GeneratedFile(filename=filename, content=content, line_count=lc)
+
         parts: list[str] = []
         use_ts = random.random() < 0.4
         ext = ".ts" if use_ts else ".js"

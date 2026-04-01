@@ -2,7 +2,7 @@ import random
 
 from codemaximus.generators.base import SlopGenerator, GeneratedFile
 from codemaximus import naming, comments
-from codemaximus.native import line_count
+from codemaximus.native import line_count, native_generate_go
 
 
 class GoSlopGenerator(SlopGenerator):
@@ -11,6 +11,11 @@ class GoSlopGenerator(SlopGenerator):
     extension = ".go"
 
     def generate(self, sanity: float, file_index: int) -> GeneratedFile:
+        if native_generate_go is not None:
+            content, lc, struct_name = native_generate_go(sanity, file_index)
+            filename = f"go/{struct_name}_{file_index}{self.extension}"
+            return GeneratedFile(filename=filename, content=content, line_count=lc)
+
         parts: list[str] = []
         pkg = naming.go_package(sanity)
         struct_name = naming.class_name(sanity)

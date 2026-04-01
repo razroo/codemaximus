@@ -11,3 +11,5 @@ crate-type = ["cdylib"]
 [dependencies]
 memchr = "2"
 pyo3 = { version = "0.23", features = ["extension-module"] }
+rand = "0.8"
+rand_chacha = "0.3"
