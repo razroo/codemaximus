@@ -1,0 +1,42 @@
+name: update-badges
+
+on:
+  schedule:
+    - cron: '15,45 * * * *'  # offset from codemaxxed's runs
+  workflow_dispatch:
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch stats and update badges
+        run: |
+          # fetch latest stats from codemaxxed
+          curl -sf https://raw.githubusercontent.com/jshchnz/codemaxxed/main/stats.json -o /tmp/stats.json || exit 0
+
+          LINES=$(jq -r '.lines' /tmp/stats.json)
+          FILES=$(jq -r '.files' /tmp/stats.json)
+          COMMITS=$(jq -r '.commits' /tmp/stats.json)
+
+          fmt_num() { echo "$1" | sed -e :a -e 's/\(.*[0-9]\)\([0-9]\{3\}\)/\1,\2/;ta'; }
+          LINES_FMT=$(fmt_num "$LINES")
+          FILES_FMT=$(fmt_num "$FILES")
+          COMMITS_FMT=$(fmt_num "$COMMITS")
+          LINES_URL=$(echo "$LINES_FMT" | sed 's/,/%2C/g')
+          FILES_URL=$(echo "$FILES_FMT" | sed 's/,/%2C/g')
+          COMMITS_URL=$(echo "$COMMITS_FMT" | sed 's/,/%2C/g')
+
+          sed -i "s|<img src=\"https://img.shields.io/badge/lines%20of%20code-[^\"]*\" alt=\"Lines of Code\">|<img src=\"https://img.shields.io/badge/lines%20of%20code-${LINES_URL}-brightgreen?style=for-the-badge\" alt=\"Lines of Code\">|" README.md
+          sed -i "s|<img src=\"https://img.shields.io/badge/files-[^\"]*\" alt=\"Files\">|<img src=\"https://img.shields.io/badge/files-${FILES_URL}-blue?style=for-the-badge\" alt=\"Files\">|" README.md
+          sed -i "s|<img src=\"https://img.shields.io/badge/commits-[^\"]*\" alt=\"Commits\">|<img src=\"https://img.shields.io/badge/commits-${COMMITS_URL}-orange?style=for-the-badge\" alt=\"Commits\">|" README.md
+
+      - name: Commit and push
+        run: |
+          git config user.name "codemaxxing-bot"
+          git config user.email "codemaxxing-bot@users.noreply.github.com"
+          git add README.md
+          git diff --staged --quiet || (git commit -m "update badges from codemaxxed stats" && git push)
