@@ -43,7 +43,8 @@ class Stats:
             f"{self.elapsed_str} elapsed"
         )
 
-    def summary(self) -> str:
+    def summary(self, note: str | None = None) -> str:
+        extra = f"  {note}\n" if note else ""
         return (
             f"\n{'='*60}\n"
             f"  CODEMAXIMUS SESSION COMPLETE\n"
@@ -54,5 +55,6 @@ class Stats:
             f"  Duration:      {self.elapsed_str:>12}\n"
             f"  Lines/sec:     {self.lines_per_sec:>12,.0f}\n"
             f"  Commits/min:   {self.commits_per_min:>12.1f}\n"
+            f"{extra}"
             f"{'='*60}\n"
         )

@@ -14,6 +14,7 @@ class GenerationConfig:
     forever: bool = False  # run indefinitely
     branch: str = ""  # use existing branch instead of creating new one
     workers: int = 0  # 0 = auto (min(8, CPU count)); else parallel generator processes
+    dry_run: bool = False  # no writes / no git (turbo simulates generation throughput only)
 
     def __post_init__(self):
         self.sanity = max(0.0, min(1.0, self.sanity))

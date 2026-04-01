@@ -12,13 +12,15 @@ ALL_GENERATORS = [
     GenericGenerator(),
 ]
 
+JAVA_GEN, PY_GEN, JS_GEN, GO_GEN, GENERIC_GEN = ALL_GENERATORS
+
 LANG_MAP = {
-    "java": [EnterpriseJavaGenerator()],
-    "python": [EnterprisePythonGenerator()],
-    "js": [JavaScriptGenerator()],
-    "javascript": [JavaScriptGenerator()],
-    "go": [GoSlopGenerator()],
-    "generic": [GenericGenerator()],
+    "java": [JAVA_GEN],
+    "python": [PY_GEN],
+    "js": [JS_GEN],
+    "javascript": [JS_GEN],
+    "go": [GO_GEN],
+    "generic": [GENERIC_GEN],
     "all": ALL_GENERATORS,
 }
 

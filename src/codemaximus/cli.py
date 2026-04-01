@@ -1,7 +1,16 @@
 import argparse
+import importlib.metadata
 import sys
+import time
 
 from codemaximus.config import GenerationConfig
+
+
+def _package_version() -> str:
+    try:
+        return importlib.metadata.version("codemaximus")
+    except importlib.metadata.PackageNotFoundError:
+        return "0.0.0-dev"
 
 
 def main():
@@ -26,9 +35,16 @@ def main():
             "  codemaximus --turbo --forever --push-every 50 --batch-size 30\n"
             "  codemaximus --turbo --forever --branch main --push-every 100\n"
             "  codemaximus --turbo --lines 20000 --workers 4 --batch-size 20\n"
+            "  codemaximus --lines 10000 --dry-run\n"
+            "  codemaximus --turbo --lines 50000 --dry-run\n"
             "  codemaximus hyperdrive --commits 10000 --branch main --push\n"
             "  codemaximus hyperdrive --commits 10000 --batches 3 --push\n"
         ),
+    )
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"%(prog)s {_package_version()}",
     )
 
     parser.add_argument(
@@ -77,6 +93,14 @@ def main():
         "--workers", type=int, default=0, metavar="N",
         help="Parallel generator processes in turbo (0 = auto, default: 0)",
     )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help=(
+            "Do not write files or run git. Estimates lines/files from in-memory generation "
+            "(turbo: no branch setup or commits; normal: no output on disk)."
+        ),
+    )
 
     args = parser.parse_args()
 
@@ -92,22 +116,40 @@ def main():
         forever=args.forever,
         branch=args.branch,
         workers=args.workers,
+        dry_run=args.dry_run,
     )
 
     if config.turbo:
         from codemaximus.turbo import run_turbo
         run_turbo(config)
     else:
-        from codemaximus.generator import generate, write_files
-        print(f"Generating {config.lines:,} lines of pure slop...")
+        from codemaximus.generator import generate_to_directory
+
+        tag = " (dry-run)" if config.dry_run else ""
+        print(f"Generating {config.lines:,} lines of pure slop{tag}...")
         print(f"Sanity: {config.sanity:.0%} | Lang: {config.lang} | Output: {config.output_dir}")
         print()
 
-        files = generate(config)
-        total = write_files(files, config.output_dir)
-
-        print(f"Done! Generated {total:,} lines across {len(files)} files.")
-        print(f"Output: {config.output_dir}/")
+        t0 = time.perf_counter()
+        total, nfiles, samples = generate_to_directory(
+            config,
+            config.output_dir,
+            dry_run=config.dry_run,
+            sample_limit=5,
+        )
+        elapsed = time.perf_counter() - t0
+        rate = total / elapsed if elapsed > 0 else 0.0
+        if config.dry_run:
+            print(f"Would write {nfiles:,} files ({total:,} lines, on target).")
+            print(f"Generation wall time: {elapsed:.2f}s (~{rate:,.0f} lines/s).")
+            if samples:
+                print(f"Sample paths ({len(samples)}/{nfiles}):")
+                for path in samples:
+                    print(f"  {path}")
+        else:
+            print(f"Done! Generated {total:,} lines across {nfiles:,} files.")
+            print(f"Wall time: {elapsed:.2f}s (~{rate:,.0f} lines/s).")
+            print(f"Output: {config.output_dir}/")
 
 
 if __name__ == "__main__":

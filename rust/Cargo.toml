@@ -9,4 +9,5 @@ name = "codemaximus_native"
 crate-type = ["cdylib"]
 
 [dependencies]
+memchr = "2"
 pyo3 = { version = "0.23", features = ["extension-module"] }

@@ -222,6 +222,11 @@ def main() -> None:
     )
 
     if args.push:
+        print(
+            "Notice (hyperdrive --push): ensure host and org policy allow bulk commits "
+            "before pushing.",
+            file=sys.stderr,
+        )
         t3 = time.perf_counter()
         ok = git_push_branch(args.remote, args.branch)
         t4 = time.perf_counter()

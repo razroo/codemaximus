@@ -5,7 +5,7 @@ import time
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 
 from codemaximus.config import GenerationConfig
-from codemaximus.generator import generate_batch, write_files
+from codemaximus.generator import generate_batch, trim_batch_to_line_budget, write_files
 from codemaximus.generators.base import GeneratedFile
 from codemaximus.naming import commit_message
 from codemaximus.stats import Stats
@@ -53,48 +53,67 @@ def git_push(silent=True):
     return result.returncode == 0
 
 
+def _remote_policy_notice(kind: str) -> None:
+    print(
+        f"Notice ({kind}): pushing or automating many commits against a remote can violate "
+        "host terms or org policy. Use only where explicitly allowed.\n"
+    )
+
+
 def run_turbo(config: GenerationConfig):
     output_dir = os.path.abspath(config.output_dir)
-    os.makedirs(output_dir, exist_ok=True)
+    if not config.dry_run:
+        os.makedirs(output_dir, exist_ok=True)
 
-    # check if we're in a git repo
-    result = subprocess.run(
-        ["git", "rev-parse", "--is-inside-work-tree"],
-        capture_output=True,
-        text=True,
-        env=_git_env(),
-    )
-    if result.returncode != 0:
-        print("Error: not inside a git repository. Initialize one first.")
-        print("  git init && git add -A && git commit -m 'init'")
-        sys.exit(1)
-
-    # branch setup
-    if config.branch:
-        # use specified branch (for CI / --forever restarts)
-        current = subprocess.run(
-            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+    branch_name = ""
+    if not config.dry_run:
+        # check if we're in a git repo
+        result = subprocess.run(
+            ["git", "rev-parse", "--is-inside-work-tree"],
             capture_output=True,
             text=True,
             env=_git_env(),
-        ).stdout.strip()
-        if current != config.branch:
+        )
+        if result.returncode != 0:
+            print("Error: not inside a git repository. Initialize one first.")
+            print("  git init && git add -A && git commit -m 'init'")
+            sys.exit(1)
+
+        # branch setup
+        if config.branch:
+            # use specified branch (for CI / --forever restarts)
+            current = subprocess.run(
+                ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+                capture_output=True,
+                text=True,
+                env=_git_env(),
+            ).stdout.strip()
+            if current != config.branch:
+                subprocess.run(
+                    ["git", "checkout", "-B", config.branch],
+                    capture_output=True,
+                    env=_git_env(),
+                )
+            branch_name = config.branch
+        else:
+            branch_name = f"slop/session-{int(time.time())}"
             subprocess.run(
-                ["git", "checkout", "-B", config.branch],
+                ["git", "checkout", "-b", branch_name],
                 capture_output=True,
                 env=_git_env(),
             )
-        branch_name = config.branch
-    else:
-        branch_name = f"slop/session-{int(time.time())}"
-        subprocess.run(
-            ["git", "checkout", "-b", branch_name],
-            capture_output=True,
-            env=_git_env(),
-        )
+
+        if config.push_every > 0:
+            _remote_policy_notice("turbo --push-every")
 
     mode = "FOREVER" if config.forever else "TURBO"
-    print(f"[{mode}] Branch: {branch_name}")
+    if config.dry_run:
+        mode += "-DRYRUN"
+    if config.dry_run:
+        print(f"[{mode}] No git or disk writes; generation only.")
+        print(f"[{mode}] Hypothetical output dir: {output_dir}")
+    else:
+        print(f"[{mode}] Branch: {branch_name}")
     print(f"[{mode}] Target: {'∞' if config.forever else f'{config.lines:,}'} lines | Sanity: {config.sanity:.0%} | Lang: {config.lang}")
     tw = _turbo_workers(config)
     print(f"[{mode}] Batch: {config.batch_size} files/commit | Push every: {config.push_every or 'never'}")
@@ -108,37 +127,52 @@ def run_turbo(config: GenerationConfig):
 
     def _one_iteration(proc_pool, io_pool):
         nonlocal file_index, commits_since_push
+        remaining = None if config.forever else (config.lines - stats.total_lines)
+        if remaining is not None and remaining <= 0:
+            return
+
         files = generate_batch(
             config, config.batch_size, file_index, executor=proc_pool
         )
-        lines = write_files(
-            files,
-            output_dir,
-            io_executor=io_pool if config.batch_size > 1 else None,
-        )
         file_index += config.batch_size
+        if remaining is not None:
+            files = trim_batch_to_line_budget(files, remaining)
+        if not files:
+            return
 
-        _stage_batch_files(output_dir, files)
-        msg = commit_message(config.sanity, stats.total_commits + 1)
-        subprocess.run(
-            [
-                "git",
-                "commit",
-                "-m",
-                msg,
-                "--allow-empty",
-                "--no-verify",
-            ],
-            capture_output=True,
-            env=_git_env(),
-        )
+        if config.dry_run:
+            lines = sum(f.line_count for f in files)
+        else:
+            lines = write_files(
+                files,
+                output_dir,
+                io_executor=io_pool if len(files) > 1 else None,
+            )
 
-        stats.add(lines=lines, files=len(files), commits=1)
-        commits_since_push += 1
+        if config.dry_run:
+            stats.add(lines=lines, files=len(files), commits=0)
+        else:
+            _stage_batch_files(output_dir, files)
+            msg = commit_message(config.sanity, stats.total_commits + 1)
+            subprocess.run(
+                [
+                    "git",
+                    "commit",
+                    "-m",
+                    msg,
+                    "--allow-empty",
+                    "--no-verify",
+                ],
+                capture_output=True,
+                env=_git_env(),
+            )
 
-        if config.push_every and commits_since_push >= config.push_every:
-            git_push()
-            commits_since_push = 0
+            stats.add(lines=lines, files=len(files), commits=1)
+            commits_since_push += 1
+
+            if config.push_every and commits_since_push >= config.push_every:
+                git_push()
+                commits_since_push = 0
 
         sys.stdout.write(stats.display(mode))
         sys.stdout.flush()
@@ -168,8 +202,12 @@ def run_turbo(config: GenerationConfig):
         print(f"\n\n{mode} mode interrupted!")
 
     # final push if we have unpushed commits
-    if config.push_every and commits_since_push > 0:
+    if not config.dry_run and config.push_every and commits_since_push > 0:
         print("\nPushing remaining commits...")
         git_push(silent=False)
 
-    print(stats.summary())
+    print(
+        stats.summary(
+            note="(dry-run: no commits or files written)" if config.dry_run else None
+        )
+    )
