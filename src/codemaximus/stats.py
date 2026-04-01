@@ -46,7 +46,7 @@ class Stats:
     def summary(self) -> str:
         return (
             f"\n{'='*60}\n"
-            f"  CODEMAXXING SESSION COMPLETE\n"
+            f"  CODEMAXIMUS SESSION COMPLETE\n"
             f"{'='*60}\n"
             f"  Total lines:   {self.total_lines:>12,}\n"
             f"  Total files:   {self.total_files:>12,}\n"

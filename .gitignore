@@ -9,3 +9,8 @@ build/
 .venv/
 venv/
 .claude/
+
+# Rust / maturin
+rust/target/
+*.so
+*.dylib

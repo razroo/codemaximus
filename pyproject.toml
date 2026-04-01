@@ -1,18 +1,25 @@
 [project]
-name = "codemaxxing"
+name = "codemaximus"
 version = "0.1.0"
-description = "Maximize your lines of code. Because quantity IS quality."
+description = "CLI that synthesizes large volumes of multi-language 'enterprise' style code; optional turbo loop (generate, git add, commit) for satire and local benchmarking."
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.10"
 dependencies = []
 
+[project.optional-dependencies]
+dev = [
+    "maturin>=1.4,<2",
+]
+
 [project.scripts]
-codemaxxing = "codemaxxing.cli:main"
+codemaximus = "codemaximus.cli:main"
 
 [build-system]
-requires = ["setuptools>=68.0"]
-build-backend = "setuptools.build_meta"
+requires = ["maturin>=1.4,<2"]
+build-backend = "maturin"
 
-[tool.setuptools.packages.find]
-where = ["src"]
+[tool.maturin]
+manifest-path = "rust/Cargo.toml"
+python-source = "src"
+module-name = "codemaximus._native"

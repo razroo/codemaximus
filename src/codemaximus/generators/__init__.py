@@ -1,8 +1,8 @@
-from codemaxxing.generators.enterprise_java import EnterpriseJavaGenerator
-from codemaxxing.generators.enterprise_python import EnterprisePythonGenerator
-from codemaxxing.generators.javascript import JavaScriptGenerator
-from codemaxxing.generators.go_slop import GoSlopGenerator
-from codemaxxing.generators.generic import GenericGenerator
+from codemaximus.generators.enterprise_java import EnterpriseJavaGenerator
+from codemaximus.generators.enterprise_python import EnterprisePythonGenerator
+from codemaximus.generators.javascript import JavaScriptGenerator
+from codemaximus.generators.go_slop import GoSlopGenerator
+from codemaximus.generators.generic import GenericGenerator
 
 ALL_GENERATORS = [
     EnterpriseJavaGenerator(),

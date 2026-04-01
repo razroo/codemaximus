@@ -1,0 +1,12 @@
+[package]
+name = "codemaximus_native"
+version = "0.1.0"
+edition = "2021"
+description = "PyO3 extension for codemaximus (scaffold)"
+
+[lib]
+name = "codemaximus_native"
+crate-type = ["cdylib"]
+
+[dependencies]
+pyo3 = { version = "0.23", features = ["extension-module"] }

@@ -1,21 +1,33 @@
 import argparse
+import sys
 
-from codemaxxing.config import GenerationConfig
+from codemaximus.config import GenerationConfig
 
 
 def main():
+    if len(sys.argv) >= 2 and sys.argv[1] == "hyperdrive":
+        sys.argv.pop(1)
+        from codemaximus.hyperdrive import main as hyperdrive_main
+
+        return hyperdrive_main()
+
     parser = argparse.ArgumentParser(
-        prog="codemaxxing",
-        description="Maximize your lines of code. Because quantity IS quality.",
+        prog="codemaximus",
+        description=(
+            "Synthesize multi-language slop; optional turbo loop (generate, git add, commit)."
+        ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
             "examples:\n"
-            "  codemaxxing --lines 10000 --sanity 100\n"
-            "  codemaxxing --lines 50000 --sanity 0 --lang java\n"
-            "  codemaxxing --lines 100000 --turbo --sanity 50\n"
-            "  codemaxxing --lines 1000 --enterprise\n"
-            "  codemaxxing --turbo --forever --push-every 50 --batch-size 30\n"
-            "  codemaxxing --turbo --forever --branch main --push-every 100\n"
+            "  codemaximus --lines 10000 --sanity 100\n"
+            "  codemaximus --lines 50000 --sanity 0 --lang java\n"
+            "  codemaximus --lines 100000 --turbo --sanity 50\n"
+            "  codemaximus --lines 1000 --enterprise\n"
+            "  codemaximus --turbo --forever --push-every 50 --batch-size 30\n"
+            "  codemaximus --turbo --forever --branch main --push-every 100\n"
+            "  codemaximus --turbo --lines 20000 --workers 4 --batch-size 20\n"
+            "  codemaximus hyperdrive --commits 10000 --branch main --push\n"
+            "  codemaximus hyperdrive --commits 10000 --batches 3 --push\n"
         ),
     )
 
@@ -61,6 +73,10 @@ def main():
         "--branch", type=str, default="",
         help="Use this branch instead of creating slop/session-* (useful for CI)",
     )
+    parser.add_argument(
+        "--workers", type=int, default=0, metavar="N",
+        help="Parallel generator processes in turbo (0 = auto, default: 0)",
+    )
 
     args = parser.parse_args()
 
@@ -75,13 +91,14 @@ def main():
         push_every=args.push_every,
         forever=args.forever,
         branch=args.branch,
+        workers=args.workers,
     )
 
     if config.turbo:
-        from codemaxxing.turbo import run_turbo
+        from codemaximus.turbo import run_turbo
         run_turbo(config)
     else:
-        from codemaxxing.generator import generate, write_files
+        from codemaximus.generator import generate, write_files
         print(f"Generating {config.lines:,} lines of pure slop...")
         print(f"Sanity: {config.sanity:.0%} | Lang: {config.lang} | Output: {config.output_dir}")
         print()

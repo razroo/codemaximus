@@ -1,8 +1,8 @@
 import random
 from io import StringIO
 
-from codemaxxing.generators.base import SlopGenerator, GeneratedFile
-from codemaxxing import naming, comments
+from codemaximus.generators.base import SlopGenerator, GeneratedFile
+from codemaximus import naming, comments
 
 
 class GenericGenerator(SlopGenerator):
