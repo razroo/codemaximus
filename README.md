@@ -13,14 +13,14 @@
 _a live repo being continuously codemaxxed_
 
 <!-- LINES_BADGE -->
-<img src="https://img.shields.io/badge/lines%20of%20code-101%2C181%2C711-brightgreen?style=for-the-badge" alt="Lines of Code">
+<img src="https://img.shields.io/badge/lines%20of%20code-102%2C180%2C251-brightgreen?style=for-the-badge" alt="Lines of Code">
 <!-- /LINES_BADGE -->
 
 <!-- FILES_BADGE -->
-<img src="https://img.shields.io/badge/files-355%2C698-blue?style=for-the-badge" alt="Files">
+<img src="https://img.shields.io/badge/files-359%2C185-blue?style=for-the-badge" alt="Files">
 <!-- /FILES_BADGE -->
 <!-- COMMITS_BADGE -->
-<img src="https://img.shields.io/badge/commits-11%2C557-orange?style=for-the-badge" alt="Commits">
+<img src="https://img.shields.io/badge/commits-11%2C700-orange?style=for-the-badge" alt="Commits">
 <!-- /COMMITS_BADGE -->
 
 </div>
