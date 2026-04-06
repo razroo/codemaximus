@@ -7,6 +7,8 @@ try:
     from codemaximus._native import generate_go_py as native_generate_go
     from codemaximus._native import generate_java_py as native_generate_java
     from codemaximus._native import generate_javascript_py as native_generate_javascript
+    from codemaximus._native import build_fast_import_stream as native_build_fast_import_stream
+    from codemaximus._native import stream_fast_import_to_fd as native_stream_fast_import_to_fd
 except ImportError:
     native_line_count = None
     native_generate_generic = None
@@ -14,6 +16,8 @@ except ImportError:
     native_generate_enterprise_python = None
     native_generate_javascript = None
     native_generate_go = None
+    native_build_fast_import_stream = None
+    native_stream_fast_import_to_fd = None
 
 
 def line_count(text: str) -> int:

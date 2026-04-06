@@ -2,6 +2,7 @@
 
 mod generic_emit;
 mod go_emit;
+mod hyperdrive;
 mod java_emit;
 mod javascript_emit;
 mod namegen;
@@ -60,5 +61,7 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(generate_enterprise_python_py, m)?)?;
     m.add_function(wrap_pyfunction!(generate_javascript_py, m)?)?;
     m.add_function(wrap_pyfunction!(generate_go_py, m)?)?;
+    m.add_function(wrap_pyfunction!(hyperdrive::build_fast_import_stream, m)?)?;
+    m.add_function(wrap_pyfunction!(hyperdrive::stream_fast_import_to_fd, m)?)?;
     Ok(())
 }
