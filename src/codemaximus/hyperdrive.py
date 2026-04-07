@@ -292,19 +292,22 @@ def run_maintenance() -> None:
     print(f"[hyperdrive] maintenance done: {(t1 - t0) * 1000:.1f} ms")
 
 
-def git_push_branch(remote: str, branch: str) -> bool:
-    """Push with optimized settings for bulk commits."""
+def _push_cmd() -> list[str]:
+    """Base git push command with optimized pack settings."""
+    return [
+        "git",
+        "-c", "pack.allowPackReuse=multi",
+        "-c", "pack.useSparse=true",
+        "-c", "pack.threads=0",
+        "-c", "pack.window=1",
+        "-c", "pack.depth=1",
+    ]
+
+
+def _push_one(remote: str, refspec: str) -> bool:
+    """Push a single refspec with optimized flags."""
     r = subprocess.run(
-        [
-            "git",
-            "-c", "pack.allowPackReuse=multi",   # reuse pack chunks, skip re-compression
-            "-c", "pack.useSparse=true",
-            "-c", "pack.threads=0",
-            "-c", "pack.window=1",
-            "-c", "pack.depth=1",
-            "push", "--no-thin",                  # skip thin-pack delta computation
-            "-u", remote, f"{branch}:{branch}",
-        ],
+        _push_cmd() + ["push", "--no-thin", "-u", remote, refspec],
         capture_output=True,
         text=True,
         env=_git_env(),
@@ -312,6 +315,82 @@ def git_push_branch(remote: str, branch: str) -> bool:
     if r.returncode != 0:
         print(r.stderr.strip() or r.stdout.strip(), file=sys.stderr)
         return False
+    return True
+
+
+def _count_unpushed(remote: str, branch: str) -> int:
+    """Count commits on local branch that aren't on the remote."""
+    r = subprocess.run(
+        ["git", "rev-list", "--count", f"{remote}/{branch}..{branch}"],
+        capture_output=True, text=True, env=_git_env(),
+    )
+    if r.returncode != 0:
+        # Remote branch may not exist yet — all commits are unpushed
+        r2 = subprocess.run(
+            ["git", "rev-list", "--count", branch],
+            capture_output=True, text=True, env=_git_env(),
+        )
+        return int(r2.stdout.strip()) if r2.returncode == 0 else 0
+    return int(r.stdout.strip())
+
+
+def git_push_branch(remote: str, branch: str, chunk_size: int = 1_000_000) -> bool:
+    """
+    Push with automatic chunking to stay under GitHub's pack size limit.
+    Pushes at most `chunk_size` commits per round trip (~850 MiB per 1M commits).
+    """
+    # Fetch remote ref first so we can count unpushed
+    subprocess.run(
+        ["git", "fetch", "--no-tags", "--depth=1", remote, branch],
+        capture_output=True, env=_git_env(),
+    )
+
+    unpushed = _count_unpushed(remote, branch)
+    if unpushed == 0:
+        print("[hyperdrive] nothing to push")
+        return True
+
+    if unpushed <= chunk_size:
+        # Small enough for one push
+        print(f"[hyperdrive] pushing {unpushed:,} commits in one shot")
+        return _push_one(remote, f"{branch}:{branch}")
+
+    # Chunked push: find intermediate commits and push progressively
+    chunks = (unpushed + chunk_size - 1) // chunk_size
+    print(f"[hyperdrive] pushing {unpushed:,} commits in {chunks} chunks of ~{chunk_size:,}")
+
+    # Build list of intermediate SHAs from newest to oldest
+    offsets = list(range(unpushed - chunk_size, 0, -chunk_size))
+    shas = []
+    for offset in offsets:
+        r = subprocess.run(
+            ["git", "rev-parse", f"HEAD~{offset}"],
+            capture_output=True, text=True, env=_git_env(),
+        )
+        if r.returncode == 0:
+            shas.append(r.stdout.strip())
+
+    # Push each intermediate SHA, then finally HEAD
+    for i, sha in enumerate(shas):
+        t0 = time.perf_counter()
+        print(f"[hyperdrive] push chunk {i + 1}/{chunks}: {sha[:12]}…")
+        ok = _push_one(remote, f"{sha}:refs/heads/{branch}")
+        t1 = time.perf_counter()
+        if not ok:
+            print(f"[hyperdrive] chunk {i + 1} failed", file=sys.stderr)
+            return False
+        print(f"[hyperdrive] chunk {i + 1}/{chunks} done: {(t1 - t0) * 1000:.0f} ms")
+
+    # Final chunk: push HEAD
+    t0 = time.perf_counter()
+    print(f"[hyperdrive] push chunk {chunks}/{chunks}: HEAD")
+    ok = _push_one(remote, f"{branch}:{branch}")
+    t1 = time.perf_counter()
+    if not ok:
+        print(f"[hyperdrive] final chunk failed", file=sys.stderr)
+        return False
+    print(f"[hyperdrive] chunk {chunks}/{chunks} done: {(t1 - t0) * 1000:.0f} ms")
+
     return True
 
 
@@ -367,6 +446,12 @@ def main() -> None:
         "--maintain",
         action="store_true",
         help="Run git multi-pack-index + commit-graph after import (speeds up push)",
+    )
+    p.add_argument(
+        "--chunk-size",
+        type=int,
+        default=1_000_000,
+        help="Max commits per push chunk to stay under GitHub's limit (default: 1000000)",
     )
     args = p.parse_args()
 
@@ -487,15 +572,10 @@ def main() -> None:
         run_maintenance()
 
     if args.push:
-        print(
-            "Notice (hyperdrive --push): ensure host and org policy allow bulk commits "
-            "before pushing.",
-            file=sys.stderr,
-        )
         t3 = time.perf_counter()
-        ok = git_push_branch(args.remote, args.branch)
+        ok = git_push_branch(args.remote, args.branch, chunk_size=args.chunk_size)
         t4 = time.perf_counter()
-        print(f"[hyperdrive] git push: {(t4 - t3) * 1000:.1f} ms (success={ok})")
+        print(f"[hyperdrive] push total: {(t4 - t3) * 1000:.1f} ms (success={ok})")
         if not ok:
             sys.exit(1)
     else:
