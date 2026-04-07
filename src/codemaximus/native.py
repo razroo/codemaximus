@@ -10,6 +10,7 @@ try:
     from codemaximus._native import build_fast_import_stream as native_build_fast_import_stream
     from codemaximus._native import stream_fast_import_to_fd as native_stream_fast_import_to_fd
     from codemaximus._native import stream_multi_batch_to_fd as native_stream_multi_batch_to_fd
+    from codemaximus._native import hyperdrive_direct as native_hyperdrive_direct
 except ImportError:
     native_line_count = None
     native_generate_generic = None
@@ -20,6 +21,7 @@ except ImportError:
     native_build_fast_import_stream = None
     native_stream_fast_import_to_fd = None
     native_stream_multi_batch_to_fd = None
+    native_hyperdrive_direct = None
 
 
 def line_count(text: str) -> int:

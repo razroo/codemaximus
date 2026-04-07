@@ -21,6 +21,7 @@ from typing import Optional
 
 from codemaximus.native import (
     native_build_fast_import_stream,
+    native_hyperdrive_direct,
     native_stream_fast_import_to_fd,
     native_stream_multi_batch_to_fd,
 )
@@ -368,8 +369,10 @@ def main() -> None:
 
     _check_repo()
 
+    can_direct = native_hyperdrive_direct is not None
     can_multi = native_stream_multi_batch_to_fd is not None
     backend = (
+        "direct-pack" if can_direct else
         "rust-multi-stream" if can_multi else
         "rust-streaming" if native_stream_fast_import_to_fd is not None else
         "rust-buffered" if native_build_fast_import_stream is not None else
@@ -380,7 +383,29 @@ def main() -> None:
     base_tag = args.batch_tag or int(time.time()) % 1_000_000_000
     total_commits = args.commits * args.batches
 
-    if can_multi and args.batches > 1:
+    if can_direct:
+        # Direct packfile writer — no git fast-import subprocess at all
+        repo_path = os.getcwd()
+        parent = _resolve_parent_ref(args.branch)
+        base_ts = int(time.time())
+
+        print(
+            f"[hyperdrive] direct pack: {args.batches} batches x {args.commits:,} = "
+            f"{total_commits:,} commits (no subprocess)"
+        )
+        print(
+            f"[hyperdrive] branch={args.branch} "
+            f"parent={'(new root)' if parent is None else parent[:12] + '…'} "
+            f"base_tag={base_tag}"
+        )
+
+        written, total_wall = native_hyperdrive_direct(
+            repo_path, args.branch, args.batches, args.commits,
+            parent, base_tag, base_ts,
+        )
+        total_commits = written
+
+    elif can_multi and args.batches > 1:
         # Single fast-import process for ALL batches → 1 pack file
         parent = _resolve_parent_ref(args.branch)
         base_ts = int(time.time())
@@ -445,8 +470,7 @@ def main() -> None:
     rate = total_commits / total_wall if total_wall > 0 else 0
     print(
         f"[hyperdrive] done: {args.batches} batches | {total_commits:,} commits | "
-        f"wall: {total_wall * 1000:.1f} ms | {rate:,.0f} commits/s | "
-        f"packs: {'1 (single-process)' if can_multi and args.batches > 1 else str(args.batches)}"
+        f"wall: {total_wall * 1000:.1f} ms | {rate:,.0f} commits/s"
     )
 
     if args.maintain:

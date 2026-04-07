@@ -4,6 +4,7 @@ mod generic_emit;
 mod go_emit;
 mod hyperdrive;
 mod java_emit;
+mod packwriter;
 mod javascript_emit;
 mod namegen;
 mod python_emit;
@@ -64,5 +65,6 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(hyperdrive::build_fast_import_stream, m)?)?;
     m.add_function(wrap_pyfunction!(hyperdrive::stream_fast_import_to_fd, m)?)?;
     m.add_function(wrap_pyfunction!(hyperdrive::stream_multi_batch_to_fd, m)?)?;
+    m.add_function(wrap_pyfunction!(packwriter::hyperdrive_direct, m)?)?;
     Ok(())
 }
