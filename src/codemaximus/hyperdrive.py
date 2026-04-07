@@ -293,8 +293,18 @@ def run_maintenance() -> None:
 
 
 def git_push_branch(remote: str, branch: str) -> bool:
+    """Push with optimized settings for bulk commits."""
     r = subprocess.run(
-        ["git", "push", "-u", remote, f"{branch}:{branch}"],
+        [
+            "git",
+            "-c", "pack.allowPackReuse=multi",   # reuse pack chunks, skip re-compression
+            "-c", "pack.useSparse=true",
+            "-c", "pack.threads=0",
+            "-c", "pack.window=1",
+            "-c", "pack.depth=1",
+            "push", "--no-thin",                  # skip thin-pack delta computation
+            "-u", remote, f"{branch}:{branch}",
+        ],
         capture_output=True,
         text=True,
         env=_git_env(),

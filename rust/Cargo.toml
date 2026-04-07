@@ -9,6 +9,7 @@ name = "codemaximus_native"
 crate-type = ["cdylib"]
 
 [dependencies]
+crc32fast = "1"
 memchr = "2"
 pyo3 = { version = "0.23", features = ["extension-module"] }
 rand = "0.8"
