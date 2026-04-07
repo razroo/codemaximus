@@ -16,6 +16,7 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+import threading
 import time
 from typing import Optional
 
@@ -276,18 +277,21 @@ def _run_multi_batch_streamed(
     return t1 - t0
 
 
-def run_maintenance() -> None:
-    """Run git multi-pack-index and commit-graph to speed up future operations."""
-    print("[hyperdrive] running maintenance (multi-pack-index + commit-graph)...")
+def run_maintenance(full: bool = True) -> None:
+    """Run git maintenance. full=True includes commit-graph (slow on huge repos)."""
     t0 = time.perf_counter()
     subprocess.run(
         ["git", "multi-pack-index", "write"],
         capture_output=True, env=_git_env(),
     )
-    subprocess.run(
-        ["git", "commit-graph", "write", "--reachable", "--changed-paths"],
-        capture_output=True, env=_git_env(),
-    )
+    if full:
+        print("[hyperdrive] running maintenance (multi-pack-index + commit-graph)...")
+        subprocess.run(
+            ["git", "commit-graph", "write", "--reachable", "--changed-paths"],
+            capture_output=True, env=_git_env(),
+        )
+    else:
+        print("[hyperdrive] running maintenance (multi-pack-index only)...")
     t1 = time.perf_counter()
     print(f"[hyperdrive] maintenance done: {(t1 - t0) * 1000:.1f} ms")
 
@@ -453,6 +457,11 @@ def main() -> None:
         default=1_000_000,
         help="Max commits per push chunk to stay under GitHub's limit (default: 1000000)",
     )
+    p.add_argument(
+        "--pipeline",
+        action="store_true",
+        help="Pipeline mode: generate chunk → push chunk → generate next (overlaps I/O)",
+    )
     args = p.parse_args()
 
     if args.commits < 1:
@@ -478,8 +487,97 @@ def main() -> None:
     base_tag = args.batch_tag or int(time.time()) % 1_000_000_000
     total_commits = args.commits * args.batches
 
+    # Pipeline mode: generate chunk_size commits, push, repeat
+    if args.pipeline and args.push and can_direct and total_commits > args.chunk_size:
+        repo_path = os.getcwd()
+        t_start = time.perf_counter()
+        remaining = total_commits
+        generated = 0
+        chunk_idx = 0
+        push_thread: Optional[threading.Thread] = None
+        push_errors: list[str] = []
+
+        def _bg_push(remote: str, branch: str, chunk_size: int, idx: int) -> None:
+            """Push in background thread while next chunk generates."""
+            t0 = time.perf_counter()
+            ok = git_push_branch(remote, branch, chunk_size=chunk_size)
+            t1 = time.perf_counter()
+            if not ok:
+                push_errors.append(f"push chunk {idx} failed")
+            else:
+                print(f"[pipeline] push chunk {idx} done: {(t1 - t0) * 1000:.0f} ms")
+
+        print(
+            f"[pipeline] generating {total_commits:,} commits in chunks of "
+            f"{args.chunk_size:,}, pushing each chunk in background"
+        )
+
+        while remaining > 0:
+            chunk_commits = min(remaining, args.chunk_size)
+            # Calculate batches for this chunk
+            chunk_batches = max(1, chunk_commits // args.commits)
+            actual_commits = chunk_batches * args.commits
+            chunk_idx += 1
+
+            parent = _resolve_parent_ref(args.branch)
+            base_ts = int(time.time())
+            chunk_tag = base_tag + generated
+
+            print(
+                f"[pipeline] chunk {chunk_idx}: generating {actual_commits:,} commits..."
+            )
+
+            written, gen_time = native_hyperdrive_direct(
+                repo_path, args.branch, chunk_batches, args.commits,
+                parent, chunk_tag, base_ts,
+            )
+            generated += written
+            remaining -= actual_commits
+            print(
+                f"[pipeline] chunk {chunk_idx}: generated {written:,} in "
+                f"{gen_time * 1000:.0f} ms ({written / gen_time:,.0f} commits/s)"
+            )
+
+            # Wait for previous push to finish before starting next
+            if push_thread is not None:
+                push_thread.join()
+                if push_errors:
+                    print(push_errors[-1], file=sys.stderr)
+                    sys.exit(1)
+
+            # Light maintenance (multi-pack-index only, skip slow commit-graph)
+            run_maintenance(full=False)
+
+            # Start push in background
+            push_thread = threading.Thread(
+                target=_bg_push,
+                args=(args.remote, args.branch, args.chunk_size, chunk_idx),
+            )
+            push_thread.start()
+
+        # Wait for final push
+        if push_thread is not None:
+            push_thread.join()
+            if push_errors:
+                print(push_errors[-1], file=sys.stderr)
+                sys.exit(1)
+
+        t_end = time.perf_counter()
+        total_wall = t_end - t_start
+
+        # Full maintenance at the very end
+        if args.maintain:
+            run_maintenance(full=True)
+
+        rate = generated / total_wall if total_wall > 0 else 0
+        print(
+            f"[pipeline] done: {generated:,} commits | "
+            f"wall: {total_wall * 1000:.1f} ms | {rate:,.0f} commits/s (including push)"
+        )
+        return
+
+    # Non-pipeline mode: generate all, then push
     if can_direct:
-        # Direct packfile writer — no git fast-import subprocess at all
         repo_path = os.getcwd()
         parent = _resolve_parent_ref(args.branch)
         base_ts = int(time.time())
@@ -501,7 +599,6 @@ def main() -> None:
         total_commits = written
 
     elif can_multi and args.batches > 1:
-        # Single fast-import process for ALL batches → 1 pack file
         parent = _resolve_parent_ref(args.branch)
         base_ts = int(time.time())
 
@@ -524,7 +621,6 @@ def main() -> None:
             base_ts=base_ts,
         )
     else:
-        # Fallback: one fast-import per batch
         total_wall = 0.0
         total_commits = 0
 
@@ -569,7 +665,7 @@ def main() -> None:
     )
 
     if args.maintain:
-        run_maintenance()
+        run_maintenance(full=True)
 
     if args.push:
         t3 = time.perf_counter()
