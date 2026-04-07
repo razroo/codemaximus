@@ -87,20 +87,19 @@ def _build_fast_import_stream_py(
 ) -> bytes:
     """Pure-Python fallback when the Rust extension is not available."""
     chunks: list[bytes] = []
-    name = "Codemaximus Hyperdrive"
-    email = "hyperdrive@codemaximus.local"
-    path = "slop/hyperdrive_signal.txt"
     ref_line = f"commit refs/heads/{branch}\n".encode()
-    # Pre-encode static parts
-    author_prefix = f"author {name} <{email}> ".encode()
-    committer_prefix = f"committer {name} <{email}> ".encode()
+    author_prefix = b"author cm <cm@h> "
+    committer_prefix = b"committer cm <cm@h> "
     tz_suffix = b" +0000\n"
-    file_mod_prefix = f"M 100644 inline {path}\n".encode()
+    tag_b = str(batch_tag).encode()
+
+    # Shared blob as mark :1
+    blob_content = b"h\n"
+    chunks.append(b"blob\nmark :1\ndata " + str(len(blob_content)).encode() + b"\n" + blob_content + b"\n")
 
     for i in range(n):
-        mark = i + 1
-        msg_b = f"hyperdrive batch {batch_tag} commit {mark}/{n}".encode()
-        body = f"{batch_tag}:{mark}:{base_ts + i}\n".encode()
+        mark = i + 2  # marks start at 2 (1 is the blob)
+        msg_b = tag_b + b"." + str(i + 1).encode()
         ts_b = str(base_ts + i).encode()
 
         chunks.append(ref_line)
@@ -115,8 +114,8 @@ def _build_fast_import_stream_py(
         else:
             chunks.append(b"from :" + str(mark - 1).encode() + b"\n")
 
-        chunks.append(file_mod_prefix)
-        chunks.append(b"data " + str(len(body)).encode() + b"\n" + body)
+        # Reference shared blob by mark instead of inline
+        chunks.append(b"M 100644 :1 s\n")
 
     return b"".join(chunks)
 
