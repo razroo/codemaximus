@@ -63,5 +63,6 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(generate_go_py, m)?)?;
     m.add_function(wrap_pyfunction!(hyperdrive::build_fast_import_stream, m)?)?;
     m.add_function(wrap_pyfunction!(hyperdrive::stream_fast_import_to_fd, m)?)?;
+    m.add_function(wrap_pyfunction!(hyperdrive::stream_multi_batch_to_fd, m)?)?;
     Ok(())
 }

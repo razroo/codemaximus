@@ -22,6 +22,7 @@ from typing import Optional
 from codemaximus.native import (
     native_build_fast_import_stream,
     native_stream_fast_import_to_fd,
+    native_stream_multi_batch_to_fd,
 )
 from codemaximus.turbo import _git_env
 
@@ -233,6 +234,64 @@ def run_batch(
     )
 
 
+def _run_multi_batch_streamed(
+    *,
+    branch: str,
+    batches: int,
+    commits_per_batch: int,
+    parent_sha: Optional[str],
+    base_batch_tag: int,
+    base_ts: int,
+) -> float:
+    """
+    Stream ALL batches through a single git fast-import process.
+    Produces exactly 1 pack file. Returns total wall time.
+    """
+    proc = subprocess.Popen(
+        _fast_import_cmd(),
+        stdin=subprocess.PIPE,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+        env=_fast_import_env(),
+    )
+    assert proc.stdin is not None
+
+    t0 = time.perf_counter()
+    fd = proc.stdin.fileno()
+    native_stream_multi_batch_to_fd(
+        fd, branch, batches, commits_per_batch,
+        parent_sha, base_batch_tag, base_ts,
+    )
+    proc.stdin.write(b"done\n")
+    proc.stdin.close()
+    err = proc.stderr.read() if proc.stderr else b""
+    code = proc.wait()
+    t1 = time.perf_counter()
+
+    if code != 0:
+        print(err.decode("utf-8", errors="replace"), file=sys.stderr)
+        print(f"git fast-import failed with exit code {code}", file=sys.stderr)
+        sys.exit(1)
+
+    return t1 - t0
+
+
+def run_maintenance() -> None:
+    """Run git multi-pack-index and commit-graph to speed up future operations."""
+    print("[hyperdrive] running maintenance (multi-pack-index + commit-graph)...")
+    t0 = time.perf_counter()
+    subprocess.run(
+        ["git", "multi-pack-index", "write"],
+        capture_output=True, env=_git_env(),
+    )
+    subprocess.run(
+        ["git", "commit-graph", "write", "--reachable", "--changed-paths"],
+        capture_output=True, env=_git_env(),
+    )
+    t1 = time.perf_counter()
+    print(f"[hyperdrive] maintenance done: {(t1 - t0) * 1000:.1f} ms")
+
+
 def git_push_branch(remote: str, branch: str) -> bool:
     r = subprocess.run(
         ["git", "push", "-u", remote, f"{branch}:{branch}"],
@@ -294,6 +353,11 @@ def main() -> None:
             "(each batch appends to the same branch; default: 1)"
         ),
     )
+    p.add_argument(
+        "--maintain",
+        action="store_true",
+        help="Run git multi-pack-index + commit-graph after import (speeds up push)",
+    )
     args = p.parse_args()
 
     if args.commits < 1:
@@ -305,55 +369,89 @@ def main() -> None:
 
     _check_repo()
 
-    backend = "rust-streaming" if native_stream_fast_import_to_fd is not None else (
-        "rust-buffered" if native_build_fast_import_stream is not None else "python"
+    can_multi = native_stream_multi_batch_to_fd is not None
+    backend = (
+        "rust-multi-stream" if can_multi else
+        "rust-streaming" if native_stream_fast_import_to_fd is not None else
+        "rust-buffered" if native_build_fast_import_stream is not None else
+        "python"
     )
     print(f"[hyperdrive] backend: {backend}")
 
     base_tag = args.batch_tag or int(time.time()) % 1_000_000_000
+    total_commits = args.commits * args.batches
 
-    total_wall = 0.0
-    total_commits = 0
-
-    for batch_idx in range(args.batches):
+    if can_multi and args.batches > 1:
+        # Single fast-import process for ALL batches → 1 pack file
         parent = _resolve_parent_ref(args.branch)
-        batch_tag = base_tag + batch_idx
         base_ts = int(time.time())
 
         print(
-            f"[hyperdrive] batch {batch_idx + 1}/{args.batches} "
-            f"branch={args.branch} commits={args.commits:,} "
+            f"[hyperdrive] streaming {args.batches} batches x {args.commits:,} = "
+            f"{total_commits:,} commits through single fast-import process"
+        )
+        print(
+            f"[hyperdrive] branch={args.branch} "
             f"parent={'(new root)' if parent is None else parent[:12] + '…'} "
-            f"batch_tag={batch_tag}"
+            f"base_tag={base_tag}"
         )
 
-        build_t, import_t = run_batch(
+        total_wall = _run_multi_batch_streamed(
             branch=args.branch,
-            n=args.commits,
+            batches=args.batches,
+            commits_per_batch=args.commits,
             parent_sha=parent,
-            batch_tag=batch_tag,
+            base_batch_tag=base_tag,
             base_ts=base_ts,
         )
+    else:
+        # Fallback: one fast-import per batch
+        total_wall = 0.0
+        total_commits = 0
 
-        wall = build_t + import_t
-        total_wall += wall
-        total_commits += args.commits
+        for batch_idx in range(args.batches):
+            parent = _resolve_parent_ref(args.branch)
+            batch_tag = base_tag + batch_idx
+            base_ts = int(time.time())
 
-        if import_t > 0:
             print(
-                f"[hyperdrive] stream build: {build_t * 1000:.1f} ms | "
-                f"fast-import: {import_t * 1000:.1f} ms"
+                f"[hyperdrive] batch {batch_idx + 1}/{args.batches} "
+                f"branch={args.branch} commits={args.commits:,} "
+                f"parent={'(new root)' if parent is None else parent[:12] + '…'} "
+                f"batch_tag={batch_tag}"
             )
-        else:
-            print(
-                f"[hyperdrive] streamed batch: {build_t * 1000:.1f} ms"
+
+            build_t, import_t = run_batch(
+                branch=args.branch,
+                n=args.commits,
+                parent_sha=parent,
+                batch_tag=batch_tag,
+                base_ts=base_ts,
             )
+
+            wall = build_t + import_t
+            total_wall += wall
+            total_commits += args.commits
+
+            if import_t > 0:
+                print(
+                    f"[hyperdrive] stream build: {build_t * 1000:.1f} ms | "
+                    f"fast-import: {import_t * 1000:.1f} ms"
+                )
+            else:
+                print(
+                    f"[hyperdrive] streamed batch: {build_t * 1000:.1f} ms"
+                )
 
     rate = total_commits / total_wall if total_wall > 0 else 0
     print(
         f"[hyperdrive] done: {args.batches} batches | {total_commits:,} commits | "
-        f"wall: {total_wall * 1000:.1f} ms | {rate:,.0f} commits/s"
+        f"wall: {total_wall * 1000:.1f} ms | {rate:,.0f} commits/s | "
+        f"packs: {'1 (single-process)' if can_multi and args.batches > 1 else str(args.batches)}"
     )
+
+    if args.maintain:
+        run_maintenance()
 
     if args.push:
         print(
